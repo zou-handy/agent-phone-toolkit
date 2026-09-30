@@ -1,0 +1,9 @@
+*.db
+*.db-journal
+*.log
+*.pcap
+*.pcapng
+*.tmp
+__pycache__/
+.vscode/
+.idea/
