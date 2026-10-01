@@ -25,6 +25,15 @@ import ctypes
 from ctypes import wintypes
 import winreg
 import shutil
+import hashlib
+import io
+import tempfile
+
+try:
+    from PIL import Image, ImageGrab
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -34,7 +43,9 @@ user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
 CF_UNICODETEXT = 13
+CF_DIB = 8
 GMEM_MOVEABLE = 0x0002
+
 SW_HIDE = 0
 SW_SHOW = 5
 
@@ -199,6 +210,67 @@ def set_windows_clipboard(text: str) -> bool:
         time.sleep(0.05)
     return False
 
+kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+kernel32.GlobalSize.restype = ctypes.c_size_t
+
+def get_windows_clipboard_image():
+    """Returns (md5_hash, pil_image) if an image is on clipboard, else (None, None)."""
+    if not HAS_PIL:
+        return None, None
+    try:
+        if user32.OpenClipboard(None):
+            try:
+                if user32.IsClipboardFormatAvailable(CF_DIB):
+                    h_global = user32.GetClipboardData(CF_DIB)
+                    if h_global:
+                        p_data = kernel32.GlobalLock(h_global)
+                        if p_data:
+                            size = kernel32.GlobalSize(h_global)
+                            raw_bytes = ctypes.string_at(p_data, size)
+                            kernel32.GlobalUnlock(h_global)
+                            img_hash = hashlib.md5(raw_bytes).hexdigest()
+                            img = ImageGrab.grabclipboard()
+                            if isinstance(img, Image.Image):
+                                return img_hash, img
+            finally:
+                user32.CloseClipboard()
+    except Exception:
+        pass
+    return None, None
+
+def set_windows_clipboard_image(image) -> str:
+    """Sets a PIL Image to Windows Clipboard as CF_DIB. Returns its MD5 hash."""
+    if not HAS_PIL or image is None:
+        return ""
+    try:
+        output = io.BytesIO()
+        image.convert('RGB').save(output, 'BMP')
+        dib_data = output.getvalue()[14:]  # Strip 14-byte BITMAPFILEHEADER
+        img_hash = hashlib.md5(dib_data).hexdigest()
+        size = len(dib_data)
+        
+        for _ in range(5):
+            if user32.OpenClipboard(None):
+                try:
+                    user32.EmptyClipboard()
+                    h_global = kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
+                    if not h_global:
+                        return ""
+                    p_str = kernel32.GlobalLock(h_global)
+                    if not p_str:
+                        return ""
+                    ctypes.memmove(p_str, dib_data, size)
+                    kernel32.GlobalUnlock(h_global)
+                    user32.SetClipboardData(CF_DIB, h_global)
+                    return img_hash
+                finally:
+                    user32.CloseClipboard()
+            time.sleep(0.05)
+    except Exception as ex:
+        log(f"[Clipboard Image] Error setting clipboard image: {ex}")
+    return ""
+
+
 # Paths for ADB and scrcpy-server
 DEFAULT_ADB_PATHS = [
     os.path.join(os.path.dirname(__file__), "adb.exe"),
@@ -359,15 +431,21 @@ def install_to_system():
         pass
 
 class ClipboardSyncBridge:
-    def __init__(self, adb_path: str, forward_port: int = 28888, scid: str = "00cb5901"):
+    def __init__(self, adb_path: str, forward_port: int = 28888, scid: str = "00cb5901",
+                 enable_images: bool = True, enable_transferdock: bool = False):
         self.adb = adb_path
         self.port = forward_port
         self.scid = scid
         self.last_synced_text = ""
+        self.enable_images = enable_images
+        self.enable_transferdock = enable_transferdock
+        self.last_synced_image_hash = ""
+        self.last_phone_screenshot_ts = 0
         self.lock = threading.Lock()
         self.running = False
         self.sock = None
         self.current_device = None
+
 
     def ensure_connection(self) -> bool:
         ips = detect_phone_ip()
@@ -420,6 +498,56 @@ class ClipboardSyncBridge:
         except Exception as ex:
             log(f"[Error] Failed to send clipboard to phone: {ex}")
             return False
+
+    def phone_screenshot_watcher_thread(self):
+        """Watches phone's screenshot folder for new screenshots and pulls to PC clipboard."""
+        log("[ScreenshotWatcher] Monitoring phone screenshots (3-finger / status bar / gesture)...")
+        init_cmd = [self.adb, "-s", self.current_device, "shell",
+                    "stat -c '%Y %n' /sdcard/DCIM/Screenshots/* /sdcard/Pictures/Screenshots/* 2>/dev/null | sort -n | tail -n 1"]
+        out = run_cmd(init_cmd, timeout=3)
+        if out:
+            parts = out.strip().split()
+            if len(parts) >= 2 and parts[0].isdigit():
+                self.last_phone_screenshot_ts = int(parts[0])
+
+        temp_dir = tempfile.gettempdir()
+        local_target = os.path.join(temp_dir, "phone_screenshot_latest.jpg")
+
+        while self.running and self.current_device:
+            time.sleep(1.0)
+            try:
+                stat_cmd = [self.adb, "-s", self.current_device, "shell",
+                            "stat -c '%Y %n' /sdcard/DCIM/Screenshots/* /sdcard/Pictures/Screenshots/* 2>/dev/null | sort -n | tail -n 1"]
+                stat_out = run_cmd(stat_cmd, timeout=3)
+                if not stat_out:
+                    continue
+                parts = stat_out.strip().split()
+                if len(parts) < 2 or not parts[0].isdigit():
+                    continue
+                ts = int(parts[0])
+                remote_path = parts[1]
+
+                if "PC_Clip_" in remote_path:
+                    continue
+
+                if ts > self.last_phone_screenshot_ts:
+                    self.last_phone_screenshot_ts = ts
+                    filename = os.path.basename(remote_path)
+                    log(f"[Phone -> PC Screenshot] Detected new screenshot on phone: {filename}")
+                    run_cmd([self.adb, "-s", self.current_device, "pull", remote_path, local_target], timeout=10)
+                    if os.path.exists(local_target) and HAS_PIL:
+                        try:
+                            with Image.open(local_target) as img:
+                                new_hash = set_windows_clipboard_image(img)
+                                if new_hash:
+                                    with self.lock:
+                                        self.last_synced_image_hash = new_hash
+                                    log(f"[Phone -> PC Screenshot] Injected into Windows Clipboard! (Ready to Ctrl+V, size: {img.size})")
+                        except Exception as e:
+                            log(f"[Phone -> PC Screenshot] Failed to process image: {e}")
+            except Exception as ex:
+                if self.running:
+                    log(f"[ScreenshotWatcher] Error: {ex}")
 
     def phone_reader_thread(self):
         while self.running and self.sock:
@@ -509,17 +637,59 @@ class ClipboardSyncBridge:
                 t_reader = threading.Thread(target=self.phone_reader_thread, daemon=True)
                 t_reader.start()
 
+                if self.enable_images and HAS_PIL:
+                    t_screenshot = threading.Thread(target=self.phone_screenshot_watcher_thread, daemon=True)
+                    t_screenshot.start()
+
+                temp_dir = tempfile.gettempdir()
+                local_pc_clip = os.path.join(temp_dir, "pc_clipboard_image.png")
+
                 while self.running:
-                    time.sleep(0.2)
+                    time.sleep(0.25)
+                    # 1. Text sync
                     current_win = get_windows_clipboard()
                     if current_win and current_win != self.last_synced_text:
                         with self.lock:
                             self.last_synced_text = current_win
                         preview = current_win.replace('\n', ' ')[:40]
-                        log(f"[PC -> Phone] Syncing ({len(current_win)} chars): '{preview}'")
+                        log(f"[PC -> Phone Text] Syncing ({len(current_win)} chars): '{preview}'")
                         success = self.send_to_phone(current_win)
+                        if self.enable_transferdock:
+                            try:
+                                escaped_text = current_win.replace('"', '\\"').replace("'", "'\\''")[:2000]
+                                dock_cmd = [self.adb, "-s", self.current_device, "shell",
+                                            f"am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT \"{escaped_text}\" -n com.coloros.smartsidebar/com.oplus.smartsidebar.panelview.transferdock.view.TransferDockReceiveActivity"]
+                                subprocess.Popen(dock_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, creationflags=CREATE_NO_WINDOW)
+                                log("[PC -> Phone Text] Also injected into OPPO TransferDock!")
+                            except Exception:
+                                pass
                         if not success:
                             break
+
+                    # 2. Image sync
+                    if self.enable_images and HAS_PIL:
+                        img_hash, img_obj = get_windows_clipboard_image()
+                        if img_hash and img_hash != self.last_synced_image_hash:
+                            with self.lock:
+                                self.last_synced_image_hash = img_hash
+                            log(f"[PC -> Phone Image] Detected image on Windows clipboard ({img_obj.size})")
+                            try:
+                                img_obj.save(local_pc_clip, format='PNG')
+                                ts_str = time.strftime('%Y%m%d_%H%M%S')
+                                remote_target = f"/sdcard/Pictures/Screenshots/PC_Clip_{ts_str}.png"
+                                run_cmd([self.adb, "-s", self.current_device, "push", local_pc_clip, remote_target], timeout=10)
+                                run_cmd([self.adb, "-s", self.current_device, "shell",
+                                         f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_target}"], timeout=5)
+                                log(f"[PC -> Phone Image] Pushed to phone album: {remote_target}")
+
+                                if self.enable_transferdock:
+                                    dock_img_cmd = [self.adb, "-s", self.current_device, "shell",
+                                                    f"am start -a android.intent.action.SEND -t image/png --eu android.intent.extra.STREAM file://{remote_target} -n com.coloros.smartsidebar/com.oplus.smartsidebar.panelview.transferdock.view.TransferDockReceiveActivity"]
+                                    subprocess.Popen(dock_img_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, creationflags=CREATE_NO_WINDOW)
+                                    log("[PC -> Phone Image] Also injected into OPPO TransferDock!")
+                            except Exception as ex:
+                                log(f"[PC -> Phone Image] Sync error: {ex}")
+
 
             except KeyboardInterrupt:
                 log("[Exit] User stopped service.")
@@ -563,6 +733,15 @@ if __name__ == '__main__':
     if not is_autostart_enabled():
         enable_autostart()
 
+    enable_images = '--no-images' not in args
+    enable_transferdock = '--transferdock' in args or '--dock' in args or '--sync-transferdock' in args
+
+    if enable_images:
+        log("[Feature] Dual-direction Image & Screenshot Sync: ENABLED")
+    if enable_transferdock:
+        log("[Feature] OPPO TransferDock (中转站) Integration: ENABLED")
+
     adb_bin = find_adb()
-    bridge = ClipboardSyncBridge(adb_bin)
+    bridge = ClipboardSyncBridge(adb_bin, enable_images=enable_images, enable_transferdock=enable_transferdock)
     bridge.run()
+
