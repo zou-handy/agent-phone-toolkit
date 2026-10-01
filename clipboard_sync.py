@@ -432,19 +432,19 @@ def install_to_system():
 
 class ClipboardSyncBridge:
     def __init__(self, adb_path: str, forward_port: int = 28888, scid: str = "00cb5901",
-                 enable_images: bool = True, enable_transferdock: bool = False):
+                 enable_images: bool = True):
         self.adb = adb_path
         self.port = forward_port
         self.scid = scid
         self.last_synced_text = ""
         self.enable_images = enable_images
-        self.enable_transferdock = enable_transferdock
         self.last_synced_image_hash = ""
         self.last_phone_screenshot_ts = 0
         self.lock = threading.Lock()
         self.running = False
         self.sock = None
         self.current_device = None
+
 
 
     def ensure_connection(self) -> bool:
@@ -654,15 +654,6 @@ class ClipboardSyncBridge:
                         preview = current_win.replace('\n', ' ')[:40]
                         log(f"[PC -> Phone Text] Syncing ({len(current_win)} chars): '{preview}'")
                         success = self.send_to_phone(current_win)
-                        if self.enable_transferdock:
-                            try:
-                                escaped_text = current_win.replace('"', '\\"').replace("'", "'\\''")[:2000]
-                                dock_cmd = [self.adb, "-s", self.current_device, "shell",
-                                            f"am start -a android.intent.action.SEND -t text/plain --es android.intent.extra.TEXT \"{escaped_text}\" -n com.coloros.smartsidebar/com.oplus.smartsidebar.panelview.transferdock.view.TransferDockReceiveActivity"]
-                                subprocess.Popen(dock_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, creationflags=CREATE_NO_WINDOW)
-                                log("[PC -> Phone Text] Also injected into OPPO TransferDock!")
-                            except Exception:
-                                pass
                         if not success:
                             break
 
@@ -681,14 +672,9 @@ class ClipboardSyncBridge:
                                 run_cmd([self.adb, "-s", self.current_device, "shell",
                                          f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://{remote_target}"], timeout=5)
                                 log(f"[PC -> Phone Image] Pushed to phone album: {remote_target}")
-
-                                if self.enable_transferdock:
-                                    dock_img_cmd = [self.adb, "-s", self.current_device, "shell",
-                                                    f"am start -a android.intent.action.SEND -t image/png --eu android.intent.extra.STREAM file://{remote_target} -n com.coloros.smartsidebar/com.oplus.smartsidebar.panelview.transferdock.view.TransferDockReceiveActivity"]
-                                    subprocess.Popen(dock_img_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, creationflags=CREATE_NO_WINDOW)
-                                    log("[PC -> Phone Image] Also injected into OPPO TransferDock!")
                             except Exception as ex:
                                 log(f"[PC -> Phone Image] Sync error: {ex}")
+
 
 
             except KeyboardInterrupt:
@@ -734,14 +720,12 @@ if __name__ == '__main__':
         enable_autostart()
 
     enable_images = '--no-images' not in args
-    enable_transferdock = '--transferdock' in args or '--dock' in args or '--sync-transferdock' in args
 
     if enable_images:
         log("[Feature] Dual-direction Image & Screenshot Sync: ENABLED")
-    if enable_transferdock:
-        log("[Feature] OPPO TransferDock (中转站) Integration: ENABLED")
 
     adb_bin = find_adb()
-    bridge = ClipboardSyncBridge(adb_bin, enable_images=enable_images, enable_transferdock=enable_transferdock)
+    bridge = ClipboardSyncBridge(adb_bin, enable_images=enable_images)
     bridge.run()
+
 
