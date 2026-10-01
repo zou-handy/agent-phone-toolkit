@@ -199,9 +199,24 @@ def set_windows_clipboard(text: str) -> bool:
 
 # Paths for ADB and scrcpy-server
 DEFAULT_ADB_PATHS = [
+    os.path.join(os.path.dirname(__file__), "adb.exe"),
+    os.path.join(INSTALL_DIR, "adb.exe"),
+    os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
+    r"C:\platform-tools\adb.exe",
     r"C:\Users\Lenovo\Downloads\platform-tools-latest-windows (1)\platform-tools\adb.exe",
     "adb.exe"
 ]
+
+def find_adb():
+    # 1. Check system PATH first
+    which_adb = shutil.which("adb") or shutil.which("adb.exe")
+    if which_adb and os.path.exists(which_adb):
+        return which_adb
+    # 2. Check predefined and local directory paths
+    for p in DEFAULT_ADB_PATHS:
+        if os.path.isabs(p) and os.path.exists(p):
+            return p
+    return "adb"
 
 SCRCPY_SERVER_PATHS = [
     os.path.join(INSTALL_DIR, "scrcpy-server.jar"),
@@ -209,12 +224,6 @@ SCRCPY_SERVER_PATHS = [
     os.path.join(os.path.dirname(__file__), "scrcpy-server.jar"),
     os.path.join(os.path.dirname(__file__), "scrcpy-server")
 ]
-
-def find_adb():
-    for p in DEFAULT_ADB_PATHS:
-        if os.path.isabs(p) and os.path.exists(p):
-            return p
-    return "adb"
 
 def find_scrcpy_server():
     for p in SCRCPY_SERVER_PATHS:
@@ -326,6 +335,26 @@ def install_to_system():
     log("[Install] Installation completed successfully!")
     log(f"[Install] Launching background daemon: {target_exe} --silent")
     subprocess.Popen([target_exe, "--silent"], shell=False)
+
+    # Show friendly setup tutorial dialog for users
+    guide_text = (
+        "Agent Phone Toolkit 安装成功！\n\n"
+        "【手机端简易准备指南】\n"
+        "1. 开启手机【USB 调试】\n"
+        "   进入【设置 -> 关于本机 -> 版本信息】，连续点击【版本号】5 次开启开发者选项；\n"
+        "   进入【设置 -> 开发者选项】，开启【USB 调试】。\n"
+        "   （ColorOS/OPPO 用户务必同时开启【禁止权限监控】）\n\n"
+        "2. 建立连接（二选一）\n"
+        "   - 方案 A（免流量热点，强烈推荐）：手机开启个人热点，电脑连接该热点；\n"
+        "   - 方案 B（局域网）：手机与电脑连接同一个 Wi-Fi。\n\n"
+        "3. 首次连接授权\n"
+        "   手机若弹出「允许 USB 调试吗？」，请勾选「始终允许来自此计算机」并点确定。\n\n"
+        "程序现已在 Windows 后台隐形静默运行，无需开着任何窗口！"
+    )
+    try:
+        user32.MessageBoxW(None, guide_text, "Agent Phone Toolkit - 安装成功与手机设置指南", 0x40)
+    except Exception:
+        pass
 
 class ClipboardSyncBridge:
     def __init__(self, adb_path: str, forward_port: int = 28888, scid: str = "00cb5901"):
