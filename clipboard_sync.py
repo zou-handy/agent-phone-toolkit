@@ -38,6 +38,8 @@ GMEM_MOVEABLE = 0x0002
 SW_HIDE = 0
 SW_SHOW = 5
 
+CREATE_NO_WINDOW = 0x08000000
+
 REG_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 REG_VALUE_NAME = "AgentPhoneClipboardSync"
 INSTALL_DIR = os.path.expandvars(r"%LOCALAPPDATA%\Programs\AgentPhoneToolkit")
@@ -79,7 +81,7 @@ def enable_autostart(target_exe=None):
             f'{icon_cmd}'
             f'$sc.Save()'
         )
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True)
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     except Exception as ex:
         log(f"[Autostart] Startup shortcut error: {ex}")
     
@@ -99,7 +101,7 @@ def enable_autostart(target_exe=None):
             f'{icon_cmd}'
             f'$sc.Save()'
         )
-        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True)
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     except Exception as ex:
         log(f"[Autostart] Desktop shortcut error: {ex}")
     
@@ -233,7 +235,7 @@ def find_scrcpy_server():
 
 def run_cmd(args, timeout=10):
     try:
-        res = subprocess.run(args, capture_output=True, text=True, timeout=timeout, shell=False)
+        res = subprocess.run(args, capture_output=True, text=True, timeout=timeout, shell=False, creationflags=CREATE_NO_WINDOW)
         return res.stdout.strip()
     except Exception:
         return ""
@@ -251,7 +253,7 @@ def detect_phone_ip():
     except Exception:
         pass
     
-    candidates.extend(["172.31.39.190", "10.87.12.135"])
+    candidates.extend(["172.31.39.190", "172.31.39.190:5556", "10.87.12.135"])
     seen = set()
     result = []
     for c in candidates:
@@ -291,7 +293,7 @@ def install_to_system():
     my_pid = os.getpid()
     try:
         res = subprocess.run(["tasklist", "/FI", "IMAGENAME eq clipboard_sync.exe", "/FO", "CSV"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         for line in res.stdout.splitlines():
             parts = line.split(",")
             if len(parts) >= 2:
@@ -299,7 +301,7 @@ def install_to_system():
                 if pid_str.isdigit():
                     p = int(pid_str)
                     if p != my_pid:
-                        subprocess.run(["taskkill", "/F", "/PID", str(p)], capture_output=True)
+                        subprocess.run(["taskkill", "/F", "/PID", str(p)], capture_output=True, creationflags=CREATE_NO_WINDOW)
     except Exception:
         pass
     time.sleep(0.5)
@@ -334,7 +336,7 @@ def install_to_system():
     
     log("[Install] Installation completed successfully!")
     log(f"[Install] Launching background daemon: {target_exe} --silent")
-    subprocess.Popen([target_exe, "--silent"], shell=False)
+    subprocess.Popen([target_exe, "--silent"], shell=False, creationflags=CREATE_NO_WINDOW)
 
     # Show friendly setup tutorial dialog for users
     guide_text = (
@@ -372,7 +374,7 @@ class ClipboardSyncBridge:
         log(f"[Discovery] Testing phone IP candidates: {ips}")
         
         for ip in ips:
-            target = f"{ip}:5555"
+            target = ip if ":" in ip else f"{ip}:5555"
             log(f"[ADB] Trying to connect {target}...")
             run_cmd([self.adb, "connect", target], timeout=3)
             out = run_cmd([self.adb, "devices"], timeout=3)
@@ -404,7 +406,7 @@ class ClipboardSyncBridge:
         )
         log("[Server] Starting background scrcpy-server daemon on phone...")
         subprocess.Popen([self.adb, "-s", self.current_device, "shell", server_cmd],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False, creationflags=CREATE_NO_WINDOW)
         time.sleep(1.2)
 
     def send_to_phone(self, text: str) -> bool:
