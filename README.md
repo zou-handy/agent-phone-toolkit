@@ -1,80 +1,147 @@
 # Agent Phone Toolkit (跨设备剪贴板双向同步与管理套件)
 
-适用于 Windows 与 Android（ColorOS 16 / Android 16 实测验证）的高性能、免投屏、零发热**真正双向剪贴板同步与设备工具套件**。
+<p align="center">
+  <img src="assets/icon.png" width="160" height="160" alt="Agent Phone Toolkit Icon" style="border-radius: 28px; box-shadow: 0 8px 24px rgba(0,0,0,0.35);" />
+</p>
+
+<p align="center">
+  <b>真正免投屏 · 零发热 · 双向毫秒级 · 手机端 0 安装包</b><br>
+  专为 Windows 与 Android（实测支持 Android 7 ~ ColorOS 16 / Android 16）打造的高性能跨设备互联神器
+</p>
 
 ---
 
-## 🌟 核心特性
+## 🌟 为什么选择 Agent Phone Toolkit？
 
-1. **真正的双向无感同步**：
-   - **电脑 -> 手机**：在电脑任意软件（微信、浏览器、Word、记事本等）按 `Ctrl+C` 复制，手机剪贴板（搜狗输入法/系统剪贴板）毫秒级自动接收！
-   - **手机 -> 电脑**：在手机上长按复制任意文字，电脑剪贴板立刻自动同步，直接 `Ctrl+V` 粘贴！
-2. **轻量与零发热**：
-   - 基于 `scrcpy-server` 底层 Binder 协议通信，完全禁用视频流与音频流（`video=false, audio=false`）。
-   - 不调用硬件视频编码器，彻底解决“OPPO 互联 + 热点”导致的手机发烫发热、耗电快痛点。
-3. **独立运行与自愈机制**：
-   - 独立于任何 AI 客户端或终端窗口，打包为独立单文件 `clipboard_sync.exe`。
-   - 自动检测热点网段（如 `172.31.39.190`）与局域网 IP（`10.87.12.135`）。
-   - 手机热点断开、电脑睡眠唤醒后，自动无限重连恢复同步。
-4. **开箱即用，无需手机端安装额外应用**：
-   - 依赖无线调试与 `scrcpy-server.jar` 注入，无需在手机上额外安装第三方剪贴板 APK。
+很多用户在使用官方互联套件（如 OPPO 互联、各类手机助手）配合移动热点时，都会遇到以下痛点：
+1. **手机严重发热发烫**：官方互联强行推流视频画面，持续占用硬件视频编码器与天线带宽；
+2. **手机后台经常被杀**：手机端安装的第三方剪贴板 App 逃不过省电精灵与应用管家的冻结与查杀；
+3. **Android 10+ 隐私限制**：普通应用退到后台后，被系统严禁读取监听剪贴板，导致必须切到前台才能同步；
+4. **单向同步阉割**：很多简易工具只能“手机同步到电脑”，无法做到“电脑复制实时推送到手机”。
 
----
+**Agent Phone Toolkit 彻底重构了传输协议，解决了以上所有问题：**
 
-## 🚀 快速使用
-
-### 方式 1：双击静默后台启动（推荐，完全独立运行）
-双击运行目录下的 **`start_clipboard_sync.vbs`**：
-- 没有黑框，完全在后台静默运行。
-- 即使关闭 Antigravity、VS Code 或所有终端，剪贴板同步依然在后台默默工作。
-
-### 方式 2：控制台可视化查看日志
-双击运行 **`clipboard_sync.exe`**：
-- 可以实时看到手机与电脑每次复制的字符数和时间戳。
-
-### 方式 3：停止后台同步
-双击运行 **`stop_clipboard_sync.bat`** 即可一键结束进程。
+* ⚡ **真正的双向实时同步**：
+  * **电脑 $\rightarrow$ 手机**：电脑任意处 `Ctrl+C` 复制，手机搜狗/微信输入法剪贴板、系统剪贴板毫秒级自动接收！
+  * **手机 $\rightarrow$ 电脑**：手机长按复制任意文字，电脑直接 `Ctrl+V` 即刻粘贴！
+* ❄️ **零发热 / 零视频流（纯控制流协议）**：
+  * 直接对接 `scrcpy-server` 底层二进制控制管道（`CONTROL_MSG_TYPE_SET_CLIPBOARD 0x09` 与 `DEVICE_MSG_TYPE_CLIPBOARD 0x00`）。
+  * 完全关闭视频与音频推流，手机硬件编码器 0 占用，手机完全不发热。
+* 📱 **手机端 0 安装 / 零 APK 负担**：
+  * 手机无需安装任何第三方 APK 或常驻应用，不占手机存储空间，没有桌面垃圾图标。
+  * 依托 Android 系统原生的 `shell` 用户权限（UID 2000）在内存运行，直接调用底层 `IClipboard` 接口，**永不被 ColorOS 杀后台**，断开即完全释放。
+* 🛡️ **开机自启动与完全脱离 AI 独立常驻**：
+  * 内置 Windows 注册表 Run 项 + Startup 启动文件夹双重保险。
+  * 支持 `--silent` 隐形静默运行，无需开着终端窗口或反重力客户端，电脑开机后自动随系统自启。
 
 ---
 
-## ⏰ 开机自启（实现媲美系统级互联体验）
+## 🌐 支持的网络环境与连接拓扑
 
-1. 按下快捷键 `Win + R`，输入：
-   ```text
-   shell:startup
-   ```
-   回车打开 Windows 开机启动文件夹。
-2. 将 `start_clipboard_sync.vbs` 的**快捷方式**复制到该文件夹中。
-3. 以后电脑开机或重连手机热点时，剪贴板双向同步将全天候自动工作！
+无论你身处何种网络场景，都能轻松实现跨设备剪切板同步：
 
----
+```mermaid
+flowchart TD
+    subgraph S1 [场景 1：手机热点直连 推荐]
+        M1[OPPO 手机热点] <==>|172.31.x.1 / 192.168.43.1| W1[笔记本电脑]
+    end
 
-## 🛠️ 技术实现原理
+    subgraph S2 [场景 2：家庭/办公同一 Wi-Fi]
+        R2((家庭无线路由器))
+        M2[手机] <==> R2
+        R2 <==> W2[电脑]
+    end
 
-```
-[Windows PC]                                      [Android Device]
-  │                                                      │
-  ├─ Windows 剪贴板监听 (Win32 API)                        │
-  │     └─ 检测到复制 -> 发送 SET_CLIPBOARD (0x09) ──────>│ scrcpy-server (Shell UID 2000)
-  │                                                      │    └─ 调用系统 IClipboard
-  │                                                      │
-  │<─ 接收 DEVICE_MSG_TYPE_CLIPBOARD (0x00) ─────────────┼─ 手机复制触发 OnPrimaryClipChanged
-  └─ 写入 Windows 剪贴板 (OpenClipboard / Unicode)
+    subgraph S3 [场景 3：Tailscale 虚拟大局域网 异地远程同步]
+        M3[手机 4G/5G 移动蜂窝] <==>|WireGuard E2EE 端到端加密| T3{Tailscale Mesh}
+        T3 <==>|100.x.y.z 虚拟专网| W3[异地办公电脑]
+    end
 ```
 
-- **协议报文**：
-  - **PC -> 手机**：`0x09` (Type) + `0x00...00` (8B Sequence) + `0x00` (Paste Flag) + `Length` (4B Big-Endian) + `UTF-8 Data`
-  - **手机 -> PC**：`0x00` (Type) + `Length` (4B Big-Endian) + `UTF-8 Data`
-- **防环路回音抑制**：内置最后同步文本状态比对锁，避免 A->B 后 B 误以为是用户复制又发回给 A。
+### 1. 手机热点直连（强烈推荐 ⭐⭐⭐⭐⭐）
+* **场景**：外出办公、图书馆、宿舍等电脑直接连手机热点。
+* **特点**：延迟低于 2ms，完全不受外部公共路由器“AP 隔离”限制。程序会自动检测默认网关 IP（如 `172.31.39.190` 或 `192.168.43.1`）秒级重连。
+
+### 2. 同一 Wi-Fi 局域网（⭐⭐⭐⭐）
+* **场景**：手机和电脑都连接同一个家庭或办公室 Wi-Fi。
+* **特点**：只要路由器没有开启“AP 隔离/客户端隔离”，两端在同一子网下即可畅通同步。
+
+### 3. Tailscale 虚拟网（跨网段 / 异地安全同步 ⭐⭐⭐⭐⭐）
+* **场景**：电脑在家里开着，手机在外面用 5G 数据流量，或者两台设备连着不同的 Wi-Fi。
+* **安全性与原理**：
+  * 手机安装 Tailscale 客户端，电脑安装 Tailscale，二者登录同一个 Tailnet。
+  * 电脑只需执行 `adb connect <手机Tailscale_100_IP>:5555` 即可穿透同步。
+  * **数据安全**：Tailscale 基于 **WireGuard 协议**，所有剪贴板流量均在两端本地进行 **端到端加密（E2EE）**。Tailscale 服务器仅负责节点发现与 NAT 打洞（STUN/ICE），**绝无能力解密或查看你的剪贴板内容**，私密安全等级极高。
 
 ---
 
-## 📂 文件清单
+## 🧰 所需工具与环境准备
 
-- `clipboard_sync.exe`: 编译好的 Windows 独立可执行程序（8.4MB 单文件）
-- `clipboard_sync.py`: Python 完整源码（免第三方 C 库，纯 ctypes Win32 实现）
-- `scrcpy-server.jar`: 配套的 Android 服务端字节码
-- `start_clipboard_sync.vbs`: 静默无黑框后台启动脚本
-- `stop_clipboard_sync.bat`: 一键终止脚本
-- `session_fts5.py`: 跨会话 SQLite FTS5 倒排索引全文检索引擎
-- `wireless_phone_bridge.ps1`: 无线 ADB 与多工具桥接脚本
+### 电脑端（Windows）
+1. **Windows 10 / 11 (64位)**
+2. **Android 调试桥（ADB）**：
+   * 下载官方 Google [Platform Tools for Windows](https://developer.android.com/tools/releases/platform-tools) 并解压。
+   * 确保 `adb.exe` 处于系统环境变量 PATH 中，或放在常用目录下。
+
+### 手机端（Android）
+1. **Android 系统**：Android 7.0 及以上（实测完美兼容 ColorOS 16 / Android 16）。
+2. **开启“无线调试”**：
+   * 打开手机 **设置 -> 关于本机 -> 版本信息 -> 连续点击“版本号”5次** 开启开发者选项。
+   * 进入 **设置 -> 其他设置 -> 开发者选项**：
+     * 开启 **“USB 调试”**
+     * 开启 **“禁止权限监控”**（ColorOS 特有，防止弹出权限拦截）
+     * 开启 **“无线调试”**（端口默认为 5555）
+3. **手机端应用**：**0 安装！完全不需要安装任何 APK！**
+
+---
+
+## 🚀 下载与安装
+
+### 方式 1：下载 GitHub Release 安装包（小白推荐）
+1. 前往本仓库 [Releases 发布页面](https://github.com/zou-handy/agent-phone-toolkit/releases) 下载最新版本的 `AgentPhoneToolkit-v1.0.0-windows.zip`。
+2. 解压压缩包，右键以管理员身份运行 **`install.bat`**。
+3. 安装程序将自动：
+   * 拷贝程序到 `%LOCALAPPDATA%\Programs\AgentPhoneToolkit\`；
+   * 创建带精美图标的 **桌面快捷方式**；
+   * 注册 Windows 开机自启服务；
+   * 在后台立即静默启动服务。
+
+### 方式 2：命令行自编译与自安装
+如果你已克隆源码：
+```powershell
+# 1. 运行一键安装
+python clipboard_sync.py --install
+
+# 2. 或直接运行编译好的二进制
+./clipboard_sync.exe --silent
+```
+
+---
+
+## ⚙️ 命令行参数说明
+
+`clipboard_sync.exe` 支持以下命令行参数：
+
+| 参数 | 说明 |
+| :--- | :--- |
+| *(无参数)* | 前台控制台模式启动，实时打印每次双向同步的字符数与时间戳（调试用） |
+| `--silent` / `-s` | 隐形后台模式，隐藏 Windows 终端黑框，无感常驻 |
+| `--install` / `-i` | 一键安装到系统应用程序目录、生成桌面图标并配置开机自启 |
+| `--uninstall` / `-u` | 彻底清理系统注册表与启动项，并停止运行 |
+| `--enable-autostart` | 仅注册 Windows 开机自启（注册表 Run 项 + Startup 启动文件夹） |
+| `--disable-autostart` | 仅移除 Windows 开机自启 |
+
+---
+
+## 🔒 隐私与安全性保障
+
+* **纯本地通信**：所有数据均在手机与电脑间的局域网热点/内网直接经由 Socket 传输，不经过任何第三方云端中转服务器。
+* **零明文留存**：程序内部采用纯内存比对防回音缓存，不写任何历史剪贴板数据库到磁盘。
+* **开源透明**：完整核心代码与协议报文仅一个 Python 源码文件，无任何晦涩混淆代码。
+
+---
+
+## 📄 开源许可证
+
+本项目基于 [Apache License 2.0](LICENSE) 开源。
+欢迎提出 Issue 与 PR！

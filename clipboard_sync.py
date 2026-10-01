@@ -68,17 +68,40 @@ def enable_autostart(target_exe=None):
     # 2. Startup folder shortcut (.lnk)
     try:
         lnk_path = os.path.join(STARTUP_DIR, "AgentPhoneClipboardSync.lnk")
+        ico_path = os.path.join(os.path.dirname(target_exe), "app.ico")
+        icon_cmd = f'$sc.IconLocation = "{ico_path},0"; ' if os.path.exists(ico_path) else ''
         ps_cmd = (
             f'$ws = New-Object -ComObject WScript.Shell; '
             f'$sc = $ws.CreateShortcut("{lnk_path}"); '
             f'$sc.TargetPath = "{target_exe}"; '
             f'$sc.Arguments = "--silent"; '
             f'$sc.WorkingDirectory = "{os.path.dirname(target_exe)}"; '
+            f'{icon_cmd}'
             f'$sc.Save()'
         )
         subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True)
     except Exception as ex:
         log(f"[Autostart] Startup shortcut error: {ex}")
+    
+    # 3. Desktop shortcut (.lnk)
+    try:
+        desktop_dir = os.path.expandvars(r"%USERPROFILE%\Desktop")
+        desk_lnk = os.path.join(desktop_dir, "Agent Phone 剪切板同步.lnk")
+        ico_path = os.path.join(os.path.dirname(target_exe), "app.ico")
+        icon_cmd = f'$sc.IconLocation = "{ico_path},0"; ' if os.path.exists(ico_path) else ''
+        ps_cmd = (
+            f'$ws = New-Object -ComObject WScript.Shell; '
+            f'$sc = $ws.CreateShortcut("{desk_lnk}"); '
+            f'$sc.TargetPath = "{target_exe}"; '
+            f'$sc.Arguments = "--silent"; '
+            f'$sc.WorkingDirectory = "{os.path.dirname(target_exe)}"; '
+            f'$sc.Description = "Agent Phone 双向剪切板同步守护进程"; '
+            f'{icon_cmd}'
+            f'$sc.Save()'
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True)
+    except Exception as ex:
+        log(f"[Autostart] Desktop shortcut error: {ex}")
     
     log(f"[Autostart] Successfully enabled autostart on boot for: {target_exe}")
 
@@ -280,6 +303,18 @@ def install_to_system():
     if local_jar and os.path.exists(local_jar) and os.path.abspath(local_jar).lower() != os.path.abspath(target_jar).lower():
         shutil.copy2(local_jar, target_jar)
         log(f"[Install] Copied companion server jar -> {target_jar}")
+
+    # Copy app.ico
+    target_ico = os.path.join(INSTALL_DIR, "app.ico")
+    for possible_ico in [
+        os.path.join(os.path.dirname(__file__), "assets", "app.ico"),
+        os.path.join(os.path.dirname(__file__), "app.ico")
+    ]:
+        if os.path.exists(possible_ico):
+            if os.path.abspath(possible_ico).lower() != os.path.abspath(target_ico).lower():
+                shutil.copy2(possible_ico, target_ico)
+                log(f"[Install] Copied icon -> {target_ico}")
+            break
 
     enable_autostart(target_exe)
     
