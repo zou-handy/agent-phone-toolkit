@@ -11,6 +11,7 @@ Key features:
 - Zero-overhead: No video/audio streaming, no battery heat
 - Independent daemon: Runs as a standalone background process
 - Auto-reconnect: Seamless recovery from Wi-Fi / Hotspot disconnects & PC sleep
+- Auto-start on boot: Native Windows Registry Run key + Startup folder integration
 """
 
 import sys
@@ -22,6 +23,8 @@ import threading
 import subprocess
 import ctypes
 from ctypes import wintypes
+import winreg
+import shutil
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -32,6 +35,81 @@ kernel32 = ctypes.windll.kernel32
 
 CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
+SW_HIDE = 0
+SW_SHOW = 5
+
+REG_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+REG_VALUE_NAME = "AgentPhoneClipboardSync"
+INSTALL_DIR = os.path.expandvars(r"%LOCALAPPDATA%\Programs\AgentPhoneToolkit")
+STARTUP_DIR = os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup")
+
+def hide_console():
+    """Hide the console window when running in silent/background mode."""
+    try:
+        hwnd = kernel32.GetConsoleWindow()
+        if hwnd:
+            user32.ShowWindow(hwnd, SW_HIDE)
+    except Exception:
+        pass
+
+def enable_autostart(target_exe=None):
+    """Register application in Windows HKCU Run registry key and Startup folder."""
+    if not target_exe:
+        target_exe = os.path.abspath(sys.argv[0])
+    
+    # 1. Registry HKCU Run
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            cmd = f'"{target_exe}" --silent'
+            winreg.SetValueEx(key, REG_VALUE_NAME, 0, winreg.REG_SZ, cmd)
+    except Exception as ex:
+        log(f"[Autostart] Registry registration error: {ex}")
+
+    # 2. Startup folder shortcut (.lnk)
+    try:
+        lnk_path = os.path.join(STARTUP_DIR, "AgentPhoneClipboardSync.lnk")
+        ps_cmd = (
+            f'$ws = New-Object -ComObject WScript.Shell; '
+            f'$sc = $ws.CreateShortcut("{lnk_path}"); '
+            f'$sc.TargetPath = "{target_exe}"; '
+            f'$sc.Arguments = "--silent"; '
+            f'$sc.WorkingDirectory = "{os.path.dirname(target_exe)}"; '
+            f'$sc.Save()'
+        )
+        subprocess.run(["powershell", "-NoProfile", "-Command", ps_cmd], capture_output=True, text=True)
+    except Exception as ex:
+        log(f"[Autostart] Startup shortcut error: {ex}")
+    
+    log(f"[Autostart] Successfully enabled autostart on boot for: {target_exe}")
+
+def disable_autostart():
+    """Unregister application from Windows autostart."""
+    # 1. Remove registry key
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+            winreg.DeleteValue(key, REG_VALUE_NAME)
+    except Exception:
+        pass
+    
+    # 2. Remove startup shortcut
+    try:
+        lnk_path = os.path.join(STARTUP_DIR, "AgentPhoneClipboardSync.lnk")
+        if os.path.exists(lnk_path):
+            os.remove(lnk_path)
+    except Exception:
+        pass
+    
+    log("[Autostart] Successfully removed autostart configuration.")
+
+def is_autostart_enabled() -> bool:
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_READ) as key:
+            winreg.QueryValueEx(key, REG_VALUE_NAME)
+            return True
+    except Exception:
+        pass
+    lnk_path = os.path.join(STARTUP_DIR, "AgentPhoneClipboardSync.lnk")
+    return os.path.exists(lnk_path)
 
 user32.OpenClipboard.argtypes = [wintypes.HWND]
 user32.OpenClipboard.restype = wintypes.BOOL
@@ -74,7 +152,6 @@ def get_windows_clipboard() -> str:
 def set_windows_clipboard(text: str) -> bool:
     if not isinstance(text, str):
         return False
-    # Encode as null-terminated UTF-16LE
     text_data = (text + '\0').encode('utf-16le')
     size = len(text_data)
     
@@ -97,16 +174,17 @@ def set_windows_clipboard(text: str) -> bool:
         time.sleep(0.05)
     return False
 
-# ADB and device discovery
+# Paths for ADB and scrcpy-server
 DEFAULT_ADB_PATHS = [
     r"C:\Users\Lenovo\Downloads\platform-tools-latest-windows (1)\platform-tools\adb.exe",
     "adb.exe"
 ]
 
 SCRCPY_SERVER_PATHS = [
+    os.path.join(INSTALL_DIR, "scrcpy-server.jar"),
     r"C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Genymobile.scrcpy_Microsoft.Winget.Source_8wekyb3d8bbwe\scrcpy-win64-v4.1\scrcpy-server",
-    os.path.join(os.path.dirname(__file__), "scrcpy-server"),
-    os.path.join(os.path.dirname(__file__), "scrcpy-server.jar")
+    os.path.join(os.path.dirname(__file__), "scrcpy-server.jar"),
+    os.path.join(os.path.dirname(__file__), "scrcpy-server")
 ]
 
 def find_adb():
@@ -125,13 +203,12 @@ def run_cmd(args, timeout=10):
     try:
         res = subprocess.run(args, capture_output=True, text=True, timeout=timeout, shell=False)
         return res.stdout.strip()
-    except Exception as ex:
+    except Exception:
         return ""
 
 def detect_phone_ip():
     """Detect current phone IP from WLAN default route or known candidates."""
     candidates = []
-    # Try net route for default gateway
     try:
         cmd = ["powershell", "-NoProfile", "-Command", "Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Select-Object -ExpandProperty NextHop"]
         out = run_cmd(cmd, timeout=3)
@@ -143,7 +220,6 @@ def detect_phone_ip():
         pass
     
     candidates.extend(["172.31.39.190", "10.87.12.135"])
-    # De-duplicate preserving order
     seen = set()
     result = []
     for c in candidates:
@@ -164,6 +240,58 @@ def recv_exact(sock, n):
             return None
     return data
 
+def install_to_system():
+    os.makedirs(INSTALL_DIR, exist_ok=True)
+    target_exe = os.path.join(INSTALL_DIR, "clipboard_sync.exe")
+    target_jar = os.path.join(INSTALL_DIR, "scrcpy-server.jar")
+    
+    # Locate the actual compiled .exe file
+    if getattr(sys, 'frozen', False):
+        src_exe = sys.executable
+    else:
+        src_exe = os.path.join(os.path.dirname(__file__), "clipboard_sync.exe")
+        if not os.path.exists(src_exe):
+            src_exe = os.path.join(os.path.dirname(__file__), "dist", "clipboard_sync.exe")
+    
+    log(f"[Install] Target installation directory: {INSTALL_DIR}")
+    
+    # Terminate other running instances before overwrite (excluding self!)
+    my_pid = os.getpid()
+    try:
+        res = subprocess.run(["tasklist", "/FI", "IMAGENAME eq clipboard_sync.exe", "/FO", "CSV"],
+                             capture_output=True, text=True)
+        for line in res.stdout.splitlines():
+            parts = line.split(",")
+            if len(parts) >= 2:
+                pid_str = parts[1].strip('"')
+                if pid_str.isdigit():
+                    p = int(pid_str)
+                    if p != my_pid:
+                        subprocess.run(["taskkill", "/F", "/PID", str(p)], capture_output=True)
+    except Exception:
+        pass
+    time.sleep(0.5)
+
+    if os.path.exists(src_exe) and os.path.abspath(src_exe).lower() != os.path.abspath(target_exe).lower():
+        shutil.copy2(src_exe, target_exe)
+        log(f"[Install] Copied binary -> {target_exe}")
+
+    local_jar = find_scrcpy_server()
+    if local_jar and os.path.exists(local_jar) and os.path.abspath(local_jar).lower() != os.path.abspath(target_jar).lower():
+        shutil.copy2(local_jar, target_jar)
+        log(f"[Install] Copied companion server jar -> {target_jar}")
+
+    enable_autostart(target_exe)
+    
+    # Create uninstaller script
+    uninst_bat = os.path.join(INSTALL_DIR, "uninstall.bat")
+    with open(uninst_bat, "w", encoding="utf-8") as f:
+        f.write('@echo off\n"%~dp0clipboard_sync.exe" --uninstall\necho Uninstalled successfully.\npause\n')
+    
+    log("[Install] Installation completed successfully!")
+    log(f"[Install] Launching background daemon: {target_exe} --silent")
+    subprocess.Popen([target_exe, "--silent"], shell=False)
+
 class ClipboardSyncBridge:
     def __init__(self, adb_path: str, forward_port: int = 28888, scid: str = "00cb5901"):
         self.adb = adb_path
@@ -183,7 +311,6 @@ class ClipboardSyncBridge:
             target = f"{ip}:5555"
             log(f"[ADB] Trying to connect {target}...")
             run_cmd([self.adb, "connect", target], timeout=3)
-            # Check devices
             out = run_cmd([self.adb, "devices"], timeout=3)
             if target in out and "\tdevice" in out:
                 self.current_device = target
@@ -200,7 +327,6 @@ class ClipboardSyncBridge:
                 run_cmd([self.adb, "-s", self.current_device, "push", local_server, "/data/local/tmp/scrcpy-server.jar"], timeout=10)
 
     def start_phone_server(self):
-        # Setup forward
         run_cmd([self.adb, "-s", self.current_device, "forward", f"tcp:{self.port}", f"localabstract:scrcpy_{self.scid}"], timeout=3)
         
         # Kill previous scrcpy instance if any
@@ -282,7 +408,6 @@ class ClipboardSyncBridge:
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 self.sock.settimeout(10.0)
                 
-                # Retry socket connect up to 5 times
                 connected = False
                 for attempt in range(5):
                     try:
@@ -297,7 +422,6 @@ class ClipboardSyncBridge:
                     time.sleep(2)
                     continue
 
-                # Read 65-byte handshake: 1 byte dummy + 64 bytes device name
                 header = recv_exact(self.sock, 65)
                 if not header:
                     log("[Bridge] Handshake failed (did not receive 65 bytes).")
@@ -348,6 +472,31 @@ class ClipboardSyncBridge:
                 time.sleep(3)
 
 if __name__ == '__main__':
+    args = [a.lower() for a in sys.argv[1:]]
+
+    if '--install' in args or '-i' in args:
+        install_to_system()
+        sys.exit(0)
+
+    if '--uninstall' in args or '-u' in args:
+        disable_autostart()
+        sys.exit(0)
+
+    if '--autostart' in args or '--enable-autostart' in args:
+        enable_autostart()
+        sys.exit(0)
+
+    if '--disable-autostart' in args:
+        disable_autostart()
+        sys.exit(0)
+
+    if '--silent' in args or '-s' in args:
+        hide_console()
+
+    # Automatically ensure autostart on boot is enabled
+    if not is_autostart_enabled():
+        enable_autostart()
+
     adb_bin = find_adb()
     bridge = ClipboardSyncBridge(adb_bin)
     bridge.run()
