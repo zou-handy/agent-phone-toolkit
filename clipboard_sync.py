@@ -277,7 +277,7 @@ DEFAULT_ADB_PATHS = [
     os.path.join(INSTALL_DIR, "adb.exe"),
     os.path.expandvars(r"%LOCALAPPDATA%\Android\Sdk\platform-tools\adb.exe"),
     r"C:\platform-tools\adb.exe",
-    r"C:\Users\Lenovo\Downloads\platform-tools-latest-windows (1)\platform-tools\adb.exe",
+    os.path.expandvars(r"%USERPROFILE%\Downloads\platform-tools\adb.exe"),
     "adb.exe"
 ]
 
@@ -294,7 +294,7 @@ def find_adb():
 
 SCRCPY_SERVER_PATHS = [
     os.path.join(INSTALL_DIR, "scrcpy-server.jar"),
-    r"C:\Users\Lenovo\AppData\Local\Microsoft\WinGet\Packages\Genymobile.scrcpy_Microsoft.Winget.Source_8wekyb3d8bbwe\scrcpy-win64-v4.1\scrcpy-server",
+    os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Packages\Genymobile.scrcpy_Microsoft.Winget.Source_8wekyb3d8bbwe\scrcpy-win64-v4.1\scrcpy-server"),
     os.path.join(os.path.dirname(__file__), "scrcpy-server.jar"),
     os.path.join(os.path.dirname(__file__), "scrcpy-server")
 ]
@@ -325,7 +325,7 @@ def detect_phone_ip():
     except Exception:
         pass
     
-    candidates.extend(["172.31.39.190", "172.31.39.190:5556", "10.87.12.135"])
+    candidates.extend(["172.31.39.190", "172.31.39.190:5556", "192.168.43.1"])
     seen = set()
     result = []
     for c in candidates:
